@@ -7,6 +7,36 @@ enum MenuBarStyle: Int, CaseIterable {
     var title: String { L(["Tylko wartość", "Tylko wykres", "Wartość i wykres"][rawValue]) }
 }
 
+/// Two fixed-width rows fit inside the native menu bar without resizing on updates.
+enum NetworkMenuBarDisplay {
+    static let font = NSFont.monospacedSystemFont(ofSize: 9, weight: .medium)
+    static var rowHeight: CGFloat { ceil(NSAttributedString(string: "0", attributes: [.font: font]).size().height) }
+    static var size: NSSize {
+        NSSize(width: ceil(NSAttributedString(string: "↓ 999.9 MB/s", attributes: [.font: font]).size().width) + 8,
+               height: rowHeight * 2)
+    }
+    static func rows(download: Double, upload: Double) -> [String] {
+        ["↓ " + Fmt.rate(download), "↑ " + Fmt.rate(upload)]
+    }
+    static func image(download: Double, upload: Double) -> NSImage {
+        let lines = rows(download: download, upload: upload)
+        let image = NSImage(size: size, flipped: false) { rect in
+            let attributes: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: NSColor.black]
+            for (index, line) in lines.enumerated() {
+                let arrow = NSAttributedString(string: String(line.prefix(1)), attributes: attributes)
+                let value = NSAttributedString(string: String(line.dropFirst(2)), attributes: attributes)
+                let y = CGFloat(1 - index) * rowHeight
+                arrow.draw(at: NSPoint(x: 0, y: y))
+                value.draw(at: NSPoint(x: rect.width - value.size().width, y: y))
+            }
+            return true
+        }
+        image.isTemplate = true // Follow the menu bar's light/dark appearance and selection.
+        image.accessibilityDescription = lines.joined(separator: ", ")
+        return image
+    }
+}
+
 /// Pojedyncza pozycja w pasku menu odpowiadająca jednej metryce
 final class MenuBarModule {
     let kind: WidgetKind
@@ -45,6 +75,10 @@ final class MenuBarModule {
     /// Szerokość pozycji jest stała – inaczej zmiana liczby przesuwałaby cały pasek
     func applyLength() {
         let style = MenuBarStyle(rawValue: Prefs.shared.menuBarStyle) ?? .both
+        if kind == .network, style != .graphOnly {
+            item.length = NetworkMenuBarDisplay.size.width + 12
+            return
+        }
         let text = kind.menuBarWidth
         switch style {
         case .valueOnly: item.length = text + 22
@@ -59,6 +93,15 @@ final class MenuBarModule {
         guard let b = item.button else { return }
         let style = MenuBarStyle(rawValue: Prefs.shared.menuBarStyle) ?? .both
         pushSample(kind.menuBarValue(s))
+        if kind == .network, style != .graphOnly {
+            b.attributedTitle = NSAttributedString(string: "")
+            b.imagePosition = .imageOnly
+            b.image = NetworkMenuBarDisplay.image(download: s.net.rxRate, upload: s.net.txRate)
+            b.toolTip = "\(kind.title): " + NetworkMenuBarDisplay.rows(download: s.net.rxRate, upload: s.net.txRate).joined(separator: ", ")
+            return
+        }
+        b.imagePosition = .imageLeading
+
 
         if style == .graphOnly {
             b.attributedTitle = NSAttributedString(string: "")
